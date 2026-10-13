@@ -10,7 +10,7 @@ from food import Food
 from pheromone import PheromoneManager
 from obstacle import Obstacle
 
-
+# check change tracking
 class ObstacleTransportSimulation:
     def __init__(self, num_ants=30, width=150, height=150):
         self.width = width
