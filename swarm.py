@@ -1,4 +1,6 @@
 # swarm.py
+"""简单蚁群局部感知仿真及其 Matplotlib 动画演示。"""
+
 import math
 import random
 import numpy as np
@@ -6,13 +8,17 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from ant import Ant
 
+
 class AntSwarmSimulation:
+    """初始化一群蚂蚁，并计算每只蚂蚁感知范围内的邻居。"""
+
     def __init__(self, num_ants=20, width=100, height=100, perception_radius=20.0):
+        """设置场地和感知半径，并在场地中部随机布置蚂蚁。"""
         self.width = width
         self.height = height
         self.perception_radius = perception_radius
         
-        # 初始化蚁群
+        # 初始位置限制在场地中央区域，降低初始时贴近边界的概率。
         self.ants = [
             Ant(
                 ant_id=i,
@@ -26,11 +32,12 @@ class AntSwarmSimulation:
         ]
 
     def update(self):
-        # 1. 所有蚂蚁进行随机移动
+        """推进所有蚂蚁一步，并返回各蚂蚁当前可感知的邻居编号。"""
+        # 先更新位置，再依据更新后的坐标计算邻居关系。
         for ant in self.ants:
             ant.move()
 
-        # 2. 局部感知计算（欧氏距离邻域检测）
+        # 逐对计算欧氏距离；距离不超过感知半径的蚂蚁互为邻居。
         perceptions = {}
         for i, ant_i in enumerate(self.ants):
             neighbors = []
@@ -43,40 +50,39 @@ class AntSwarmSimulation:
             
         return perceptions
 
-# 运行与可视化
 if __name__ == "__main__":
+    # 设置动画场地、蚂蚁数量和局部感知阈值。
     env_width, env_height = 100, 100
     num_ants = 25
     perception_radius = 22.0  # 感知半径阈值
     
-    # 【可配置项】指定你要观察和高亮的特定蚂蚁 ID
+    # 指定需要突出显示并统计其邻居的蚂蚁编号。
     TARGET_ANT_ID = 1
 
     sim = AntSwarmSimulation(num_ants=num_ants, width=env_width, height=env_height, perception_radius=perception_radius)
 
+    # 创建场景坐标系和代表蚂蚁位置的散点图对象。
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_xlim(0, env_width)
     ax.set_ylim(0, env_height)
     
-    # 初始化散点图（使用稍大的点以方便观察高亮效果）
+    # 稍微放大散点，便于辨认目标蚂蚁及其邻居。
     scatter = ax.scatter([], [], s=60, edgecolors='gray', linewidths=0.5)
     
     def init():
+        """清空散点数据，供动画初始化时调用。"""
         scatter.set_offsets(np.empty((0, 2)))
         return scatter,
 
     def update_frame(frame):
-        # 获取群组感知字典
+        """动画回调：推进仿真，并根据目标蚂蚁邻居关系更新散点颜色。"""
         perceptions = sim.update()
         
-        # 提取所有蚂蚁的最新坐标
+        # 汇总所有蚂蚁当前位置并更新散点坐标。
         coords = np.array([[ant.x, ant.y] for ant in sim.ants])
         scatter.set_offsets(coords)
         
-        # 动态配置颜色方案：
-        # - 目标蚂蚁：红色 (Red)
-        # - 目标蚂蚁的可见邻居：黄色/金黄色 (Gold)
-        # - 其他普通蚂蚁：黑色 (Black)
+        # 目标蚂蚁显示为红色，其邻居显示为金色，其余蚂蚁显示为黑色。
         colors = []
         target_neighbors = perceptions.get(TARGET_ANT_ID, [])
         
@@ -90,7 +96,7 @@ if __name__ == "__main__":
                 
         scatter.set_facecolors(colors)
         
-        # 实时更新窗口标题，显示目标 ID 及其当前的邻居个数
+        # 在标题中显示目标编号和本帧的可见邻居数量。
         ax.set_title(
             f"Step 2: Swarm Perception\n"
             f"Target Ant ID: {TARGET_ANT_ID} | Visible Neighbors Count: {len(target_neighbors)}",
@@ -99,5 +105,6 @@ if __name__ == "__main__":
         
         return scatter,
 
+    # 每隔 50 毫秒刷新一次画面，共演示 400 帧。
     ani = animation.FuncAnimation(fig, update_frame, init_func=init, frames=400, interval=50, blit=False)
     plt.show()

@@ -1,0 +1,2 @@
+run,seed,steps,initial_food_x,initial_food_y,final_food_x,final_food_y,food_displacement,final_food_theta,active_transporters,returning_navigators,pheromone_particles
+1,0,600,60.0,30.0,70.2293939209324,52.9937292396608,25.166487326133552,1.9621797366265714,8,1,528

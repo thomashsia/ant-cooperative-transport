@@ -1,11 +1,17 @@
+"""单只蚂蚁随机漫步的基础示例及其 Matplotlib 动画。"""
+
 import math
 import random
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
+
 class Ant:
+    """在矩形场地内进行随机方向移动的单只蚂蚁。"""
+
     def __init__(self, x, y, width=100, height=100):
+        """初始化蚂蚁的位置、场地范围和固定移动步长。"""
         self.x = x
         self.y = y
         self.width = width
@@ -13,6 +19,7 @@ class Ant:
         self.speed = 2.0  # 移动步长
 
     def move(self):
+        """随机选取一个方向移动一步，并将位置限制在场地边界内。"""
         # 随机生成一个方向角 (0 到 2π)
         angle = random.uniform(0, 2 * math.pi)
         
@@ -24,8 +31,8 @@ class Ant:
         self.x = max(0, min(self.width, self.x))
         self.y = max(0, min(self.height, self.y))
 
-# 测试与简单可视化（单只蚂蚁的随机漫步）
 if __name__ == "__main__":
+    # 创建场地中央的蚂蚁实例并设置动画画布。
     env_width, env_height = 100, 100
     ant = Ant(env_width / 2, env_height / 2, env_width, env_height)
 
@@ -33,21 +40,22 @@ if __name__ == "__main__":
     ax.set_xlim(0, env_width)
     ax.set_ylim(0, env_height)
     
-    # 初始化散点图
+    # 创建代表蚂蚁位置的散点图。
     scatter = ax.scatter([], [], color='black', s=30, label='Single Ant')
     ax.legend(loc='upper right')
     ax.set_title("Step 1: Single Random Ant")
 
     def init():
+        """清空蚂蚁散点，供动画初始化时调用。"""
         scatter.set_offsets(np.empty((0, 2)))
         return scatter,
 
     def update(frame):
+        """动画回调：让蚂蚁移动一步，并刷新其绘图坐标。"""
         ant.move()
-        # 更新散点图坐标
         scatter.set_offsets(np.array([[ant.x, ant.y]]))
         return scatter,
 
-    # 将 blit 改为 False，完美避开底层画布关闭冲突
+    # 逐帧播放随机漫步过程；关闭 blit 以使用完整画布重绘。
     ani = animation.FuncAnimation(fig, update, init_func=init, frames=200, interval=50, blit=False)
     plt.show()

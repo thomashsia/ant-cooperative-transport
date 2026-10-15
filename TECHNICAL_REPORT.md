@@ -2,9 +2,9 @@
 
 ## 1. Executive summary / 执行摘要
 
-This project is a Python-based, two-dimensional simulation of ants coordinating to locate and transport a rectangular food object through a scene containing obstacles. Its main experiment is implemented in [`transport.py`](./transport.py): a small navigator group searches for food and lays a pheromone trail while returning to the nest; transporter ants independently approach the food, claim positions around its perimeter, and apply forces that translate and rotate the food object.
+This project is a Python-based, two-dimensional simulation of ants coordinating to locate and transport a rectangular food object through a scene containing obstacles. Its main experiment is implemented in [`transport_simulation.py`](./transport_simulation.py): a small navigator group searches for food and lays a pheromone trail while returning to the nest; transporter ants independently approach the food, claim positions around its perimeter, and apply forces that translate and rotate the food object.
 
-本项目是一个基于 Python 的二维仿真，用于研究蚂蚁如何协同寻找并搬运场景中的矩形食物。主要实验位于 [`transport.py`](./transport.py)：少量导航蚁负责搜索食物，并在返回巢穴途中留下信息素；搬运工蚁则独立接近食物、认领其周边位置，并施加作用力使食物平移和旋转。
+本项目是一个基于 Python 的二维仿真，用于研究蚂蚁如何协同寻找并搬运场景中的矩形食物。仿真核心位于 [`transport_simulation.py`](./transport_simulation.py)：少量导航蚁负责搜索食物，并在返回巢穴途中留下信息素；搬运工蚁则独立接近食物、认领其周边位置，并施加作用力使食物平移和旋转。
 
 The simulator combines:
 
@@ -29,71 +29,84 @@ It is a behavioural simulation rather than a hardware-ready robot system. Ants a
 
 | File | Responsibility |
 |---|---|
-| [`transport.py`](./transport.py) | Main cooperative-transport simulation, per-frame update loop, and animation entry point. |
+| [`transport_simulation.py`](./transport_simulation.py) | Headless cooperative-transport model and per-frame update loop; does not import plotting libraries. |
+| [`transport_visualization.py`](./transport_visualization.py) | Matplotlib renderer that reads simulation state and draws it without advancing the model. |
+| [`run_animation.py`](./run_animation.py) | Animation entry point that connects the model and renderer. |
+| [`run_experiments.py`](./run_experiments.py) | Headless batch runner that writes per-run summary metrics and optional per-step diagnostics to CSV. |
 | [`ant_crw.py`](./ant_crw.py) | Ant model used by the transport simulation: roles, states, CRW, pheromone-heading calculation, and Bug2 state fields. |
 | [`food.py`](./food.py) | Rectangular food object, perimeter slots, translation/rotation integration, and corner coordinates for rendering. |
-| [`obstacle.py`](./obstacle.py) | Axis-aligned rectangular obstacle geometry, point/segment tests, position correction, and food collision response. |
+| [`obstacle.py`](./obstacle.py) | Convex-polygon geometry, point/segment tests, position correction, and food collision response; rectangles remain supported. |
 | [`pheromone.py`](./pheromone.py) | Pheromone particle storage, intensity clamping, evaporation, and removal of depleted particles. |
 | [`ant.py`](./ant.py) | Earlier, separate ant movement model with random movement and food/pheromone attraction. |
 | [`single-ant-model.py`](./single-ant-model.py) | Standalone animation of one ant taking uniformly random steps. |
 | [`swarm.py`](./swarm.py) | Standalone local-neighbour perception example using the earlier `ant.py` model. |
-| [`README.md`](./README.md) | Project title only; it currently contains no setup or usage instructions. |
+| [`README.md`](./README.md) | Chinese project overview, module map, animation/batch commands, and dependency notes. |
 
 | 文件 | 职责 |
 |---|---|
-| [`transport.py`](./transport.py) | 协同搬运主仿真、逐帧更新循环和动画入口。 |
+| [`transport_simulation.py`](./transport_simulation.py) | 无窗口协同搬运仿真模型和逐帧更新循环；不导入绘图库。 |
+| [`transport_visualization.py`](./transport_visualization.py) | 只读取仿真状态并绘图、不推进模型的 Matplotlib renderer。 |
+| [`run_animation.py`](./run_animation.py) | 动画运行入口，负责连接仿真模型和绘图器。 |
+| [`run_experiments.py`](./run_experiments.py) | 无窗口批量运行入口，将每次运行摘要及可选的逐步诊断写入 CSV。 |
 | [`ant_crw.py`](./ant_crw.py) | 主运输仿真使用的蚂蚁模型：角色、状态、CRW、信息素朝向计算和 Bug2 状态数据。 |
 | [`food.py`](./food.py) | 矩形食物对象、周边槽位、平移/旋转积分和绘图角点计算。 |
-| [`obstacle.py`](./obstacle.py) | 轴对齐矩形障碍的几何判断、位置修正和食物碰撞响应。 |
+| [`obstacle.py`](./obstacle.py) | 凸多边形障碍的几何判断、位置修正和食物碰撞响应；兼容矩形障碍。 |
 | [`pheromone.py`](./pheromone.py) | 信息素粒子存储、强度限制、挥发和耗尽粒子清理。 |
 | [`ant.py`](./ant.py) | 早期独立的蚂蚁移动模型，包含随机移动和食物/信息素吸引。 |
 | [`single-ant-model.py`](./single-ant-model.py) | 单只蚂蚁随机移动的独立动画示例。 |
 | [`swarm.py`](./swarm.py) | 使用早期 `ant.py` 模型进行局部邻居感知的独立示例。 |
-| [`README.md`](./README.md) | 目前仅包含项目标题，尚无安装或使用说明。 |
+| [`README.md`](./README.md) | 中文项目简介、模块结构、动画/批量运行命令和依赖说明。 |
 
-The main executable path is `transport.py` → `ant_crw.py`, `food.py`, `obstacle.py`, and `pheromone.py`. The earlier ant model and the two small demonstrations are separate examples, not components of the transport simulation.
+The main runtime is split into a model path (`transport_simulation.py` → `ant_crw.py`, `food.py`, `obstacle.py`, and `pheromone.py`) and two front ends: `run_animation.py` for animation and `run_experiments.py` for headless batches. The earlier ant model and the two small demonstrations are separate examples, not components of the transport simulation.
 
-主仿真调用链为 `transport.py` → `ant_crw.py`、`food.py`、`obstacle.py` 和 `pheromone.py`。早期蚂蚁模型及两个小型演示是独立示例，并不属于协同搬运仿真的运行组件。
+主运行路径拆分为仿真模型（`transport_simulation.py` → `ant_crw.py`、`food.py`、`obstacle.py` 和 `pheromone.py`）以及两个前端：用于动画展示的 `run_animation.py` 和用于无窗口批量实验的 `run_experiments.py`。早期蚂蚁模型及两个小型演示是独立示例，并不属于协同搬运仿真的运行组件。
 
 ## 3. System architecture / 系统架构
 
 ```mermaid
 flowchart TD
-    Sim[ObstacleTransportSimulation<br/>transport.py]
+    Sim[ObstacleTransportSimulation<br/>transport_simulation.py]
     Ant[Ant agents<br/>ant_crw.py]
     Food[Food rigid body and slots<br/>food.py]
-    Obs[Rectangular obstacles<br/>obstacle.py]
+    Obs[Convex polygon obstacles<br/>obstacle.py]
     Pher[Pheromone particle manager<br/>pheromone.py]
-    Anim[Matplotlib animation]
+    Renderer[TransportRenderer<br/>transport_visualization.py]
+    Anim[Animation entry point<br/>run_animation.py]
+    Batch[Headless batch runner<br/>run_experiments.py]
 
     Sim --> Ant
     Sim --> Food
     Sim --> Obs
     Sim --> Pher
-    Sim --> Anim
+    Sim --> Renderer
+    Renderer --> Anim
+    Batch --> Sim
     Ant -->|position, role, state, heading| Sim
     Pher -->|particles queried by| Sim
     Sim -->|roles, headings, state updates| Ant
     Ant -->|forces and torques| Food
     Obs -->|ant and food collision handling| Sim
-    Food -->|position, rotation, corners| Anim
-    Pher -->|particle coordinates and intensity| Anim
+    Food -->|position, rotation, corners| Renderer
+    Renderer -->|draw calls| Anim
+    Pher -->|particle coordinates and intensity| Renderer
 ```
 
-`ObstacleTransportSimulation` is the orchestration layer. It owns the scene and all agents, advances one simulation time step in `update()`, and passes information between the modules. The animation callback calls `sim.update()` and then refreshes the Matplotlib artists; the display code does not determine the ant or food behaviour.
+`ObstacleTransportSimulation` is the orchestration layer. It owns the scene and all agents, advances one simulation time step in `update()`, and passes information between the modules. The model module does not import NumPy or Matplotlib. `TransportRenderer` reads the current model state and refreshes the Matplotlib artists; the animation entry point advances the model before asking the renderer to draw. The batch runner uses the same model without creating a window.
 
-`ObstacleTransportSimulation` 是系统的协调层，负责管理场景和所有蚂蚁，在 `update()` 中推进一个仿真时间步，并在不同模块之间传递信息。动画回调调用 `sim.update()` 后刷新 Matplotlib 图元；绘图代码本身不负责决定蚂蚁或食物的行为。
+`ObstacleTransportSimulation` 是系统的协调层，负责管理场景和所有蚂蚁，在 `update()` 中推进一个仿真时间步，并在不同模块之间传递信息。仿真模型模块不导入 NumPy 或 Matplotlib。`TransportRenderer` 只读取当前模型状态并刷新 Matplotlib 图元；动画入口先推进模型，再调用绘图器刷新画面。批量运行器复用同一仿真模型，不创建图形窗口。
 
 ### 3.1 Scene configuration / 场景配置
 
-The `transport.py` entry point currently creates a `150 × 150` arena with:
+The animation entry point currently creates a `150 × 150` arena with:
 
 - nest at `(70, 130)`;
 - 巢穴位于 `(70, 130)`；
-- food centre initially at `(90, 30)`, with size `6 × 6` and mass `5`;
-- 食物初始中心位于 `(90, 30)`，尺寸为 `6 × 6`，质量为 `5`；
+- food centre initially at `(110, 30)`, with size `6 × 6` and mass `5`;
+- 食物初始中心位于 `(110, 30)`，尺寸为 `6 × 6`，质量为 `5`；
 - two axis-aligned obstacles centred at `(40, 60)` and `(120, 60)`, each sized `40 × 6`;
 - 两个轴对齐障碍物分别以 `(40, 60)` 和 `(120, 60)` 为中心，尺寸均为 `40 × 6`；
+- a solid diamond obstacle with vertices `(75, 84)`, `(83, 92)`, `(75, 100)`, and `(67, 92)`;
+- 一个实体菱形障碍物，顶点为 `(75, 84)`、`(83, 92)`、`(75, 100)` 和 `(67, 92)`；
 - 35 ants in the animation example, with the first five assigned navigator roles;
 - 动画示例中共有 35 只蚂蚁，前五只被指定为导航蚁；
 - nominal ant speed `2.0` coordinate units per simulation update;
@@ -101,9 +114,13 @@ The `transport.py` entry point currently creates a `150 × 150` arena with:
 - simulation time step `dt = 0.05`.
 - 仿真时间步长为 `dt = 0.05`。
 
-Ant initial positions and headings, transport durations, and some movement decisions use Python's `random` module. The program does not set a random seed, so separate runs are not expected to reproduce identical trajectories.
+Ant initial positions and headings, transport durations, and some movement decisions use Python's `random` module. `run_animation.py` does not set a random seed, so animation runs are not expected to reproduce identical trajectories. `run_experiments.py` seeds each run explicitly for repeatability.
 
-蚂蚁的初始位置和朝向、搬运持续时间以及部分移动决策都使用 Python 的 `random` 模块。程序没有设置随机种子，因此不同运行之间的轨迹通常不会完全一致。
+蚂蚁的初始位置和朝向、搬运持续时间以及部分移动决策都使用 Python 的 `random` 模块。`run_animation.py` 不设置随机种子，因此不同动画运行之间的轨迹通常不会完全一致；`run_experiments.py` 会为每次运行显式设置种子，以便复现实验。
+
+Obstacles can be defined as axis-aligned rectangles with `Obstacle(x, y, width, height)` or as convex polygons with `Obstacle.from_vertices([...])`. Polygon vertices must be ordered around the boundary; either clockwise or counter-clockwise order is accepted. The animation scene includes one solid diamond. Point collision, Bug2 wall following, line-of-sight tests, rendering, and food collision handling all use the polygon boundary.
+
+障碍物既可通过 `Obstacle(x, y, width, height)` 定义为轴对齐矩形，也可通过 `Obstacle.from_vertices([...])` 定义为凸多边形。多边形顶点须按边界顺序排列，顺时针或逆时针均可。动画场景包含一个实体菱形；点碰撞、Bug2 沿边绕行、视线检测、绘图和食物碰撞处理均使用多边形边界。
 
 ## 4. Agent roles and state machines / 蚂蚁角色与状态机
 
@@ -115,16 +132,20 @@ Each transport-simulation ant has a `role`, a behaviour `state`, a heading, and 
 
 Navigator ants cycle through:
 
-1. **`free`** — Search for food. The navigator calls `compute_pheromone_heading()` with an empty pheromone list, so its search uses food odor when the food is within the configured odor radius and CRW otherwise. It does not follow existing pheromone trails while searching.
-   **`free`（自由搜索）**——寻找食物。导航蚁调用 `compute_pheromone_heading()` 时传入空的信息素列表，因此仅在食物处于气味感知范围内时追踪食物，否则执行 CRW。搜索期间不会跟随已有信息素。
-2. **`returning`** — Once within 15 units of the food, the navigator heads toward the nest using the obstacle-avoidance controller. It deposits a pheromone particle at its current position on each update.
-   **`returning`（返巢）**——接近食物到 15 个单位以内后，导航蚁使用避障控制器返回巢穴，并在每次更新时于当前位置释放一个信息素粒子。
-3. **Return to `free`** — Within 15 units of the nest, it resets its Bug2 state and starts searching again.
-   **返回 `free`**——进入巢穴 15 个单位范围内后，蚂蚁重置 Bug2 状态并重新开始搜索。
+1. **`free`** — Search for food. The navigator calls `compute_pheromone_heading()` with an empty pheromone list, so its search uses food odor when the food is within the 60-unit odor radius and CRW otherwise. It does not follow existing pheromone trails while searching.
+   **`free`（自由搜索）**——寻找食物。导航蚁调用 `compute_pheromone_heading()` 时传入空的信息素列表，因此仅在食物处于 60 个单位的气味感知范围内时追踪食物，否则执行 CRW。搜索期间不会跟随已有信息素。
+2. **`returning`** — Once within 15 units of the food and with an unobstructed line of sight to its centre, the navigator heads toward the nest using the obstacle-avoidance controller. It deposits a pheromone particle at its current position on each update.
+   **`returning`（返巢）**——导航蚁须进入食物 15 个单位范围内，且到食物中心的视线未被障碍物阻挡，才会使用避障控制器返回巢穴，并在每次更新时于当前位置释放一个信息素粒子。
+3. **Return to `free`** — Within 15 units of the nest, it resets its Bug2 state and starts searching again. This cycle repeats; there is no one-time mission-completion flag that permanently stops a navigator.
+   **返回 `free`**——进入巢穴 15 个单位范围内后，蚂蚁重置 Bug2 状态并重新开始搜索。这个循环会持续重复；当前没有“一次任务完成后永久停止导航蚁”的标志。
 
-Thus the trail is generated during the food-to-nest return leg. Pheromone strength is added as `1.0` and is subsequently reduced by the manager.
+Thus the trail is generated during each food-to-nest return leg. Pheromone strength is added as `1.0` and is subsequently reduced by the manager.
 
-因此，信息素路径是在蚂蚁从食物返回巢穴的路段上生成的。每次添加的信息素初始强度为 `1.0`，之后由管理器逐步降低。
+因此，导航蚁每次从食物返回巢穴时都会释放信息素。每次添加的信息素初始强度为 `1.0`，之后由管理器逐步降低。
+
+For return trips, the first navigator that encounters each obstacle establishes its wall-following direction. Later returning navigators reuse that direction for the same obstacle, while free-search ants retain the independent side-based rule. This shared per-simulation choice is intended to reduce split pheromone trails; it does not use pheromone to select the direction.
+
+返巢途中，每个障碍物由首只遇到它的导航蚁确定沿边方向；之后返巢的导航蚁遇到同一障碍时沿用该方向。自由搜索蚁仍使用各自根据所在侧决定方向的原规则。这个仿真级共享选择旨在减少信息素路径分叉，本身不依赖信息素来决定方向。
 
 ### 4.2 Transporter ants / 搬运工蚁
 
@@ -201,6 +222,10 @@ The two pheromone calculations therefore have different distance exponents: `1.5
 
 因此，两处信息素计算使用了不同的距离指数：蚂蚁朝向辅助函数中为 `1.5`，搬运工施力方向计算中为 `1.2`。导航蚁搜索时传入空信息素列表；搬运工则是在附着到食物后、计算作用力时读取信息素。理解“跟随信息素”在本仿真中的含义时应注意这一差异。
 
+Transporter force direction now estimates the local pheromone trail axis from particles within 20 units using an intensity/distance-weighted covariance. At least four particles and an anisotropy confidence of `0.55` are required before the PCA axis is accepted. Its sign is chosen using that individual ant's remembered pheromone-following heading. If the axis is ambiguous, the controller falls back to the weighted particle resultant when its directional confidence is at least `0.15`; otherwise it retains the individual's remembered heading. This is an individual-level local estimate, not a colony-wide or food-level commanded heading.
+
+搬运蚁施力方向现会使用 20 个单位范围内的信息素粒子，通过强度/距离加权协方差估计局部轨迹主轴。只有局部粒子不少于 4 个且各向异性置信度达到 `0.55` 时才采用 PCA 主轴；方向正反由该蚂蚁自身记忆的跟随朝向确定。若主轴存在歧义，则在加权粒子合向量方向置信度至少为 `0.15` 时回退到该合向量，否则保持个体自身记忆的方向。这是个体层面的局部估计，不是蚁群或食物层面的统一指令方向。
+
 ## 6. Cooperative transport mechanics / 协同搬运机制
 
 ### 6.1 Perimeter slots / 周边槽位
@@ -241,6 +266,10 @@ Forces and torques from the active transporters are summed and passed to `Food.u
 
 对于附着在位置 \(r=(r_x,r_y)\) 的蚂蚁，若其作用力为 \(F=(F_x,F_y)\)，则它对食物产生的二维转矩由叉积计算，如上式所示。所有正在搬运的蚂蚁贡献的合力与合转矩会求和后传给 `Food.update_dynamics()`。
 
+Before integration, the summed force is projected against obstacle contact normals when the food is overlapping an obstacle or within one coordinate unit of it. The component directed into an obstacle is removed while the tangential component is retained. If contact blocks at least 75% of the requested resultant force, the controller selects a feasible tangent direction that best advances the food toward the nest, applies at least one ant's nominal force in that direction, and suppresses torque for that update to avoid spinning in place.
+
+积分前，如果食物与障碍物重叠或距离障碍物不超过一个坐标单位，程序会依据接触法线投影合力：移除指向障碍内部的分量，并保留沿障碍切线方向的分量。如果障碍接触使合力损失达到或超过 75%，控制器会从可行切线方向中选择最能使食物靠近巢穴的方向，施加至少一只蚂蚁的标称拉力，并抑制该帧合转矩，避免食物顶住障碍原地自转。
+
 ### 6.3 Food dynamics / 食物动力学
 
 The food tracks centre position `(x, y)`, angle `theta`, linear velocity `(vx, vy)`, angular velocity `omega`, mass, and rectangular-body moment of inertia:
@@ -251,9 +280,9 @@ I = \frac{m(w^2+h^2)}{12}
 
 食物状态包括中心位置 `(x, y)`、角度 `theta`、线速度 `(vx, vy)`、角速度 `omega`、质量，以及矩形刚体的转动惯量。其转动惯量按上式计算，其中 \(m\) 为质量，\(w\) 和 \(h\) 分别为矩形宽度和高度。
 
-Translation and rotation are advanced with a simple explicit time-step update. Linear and angular damping reduce velocities over time. After the food moves, the simulation checks it against each obstacle and corrects overlap along the shallower axis, reversing and damping the corresponding velocity component by a factor of `0.2`.
+Translation and rotation are advanced with a simple explicit time-step update. Linear and angular damping reduce velocities over time. After the food moves, the simulation checks it against each obstacle using the separating axis theorem, applies a minimum-translation correction, and reduces velocity into the obstacle using a restitution coefficient of `0.2`.
 
-食物平移和旋转采用简单显式时间步积分。线性阻尼和角阻尼会逐步降低速度。食物移动后，仿真会检查其与各障碍物的重叠，并沿穿透较浅的轴推出食物，同时反向并按 `0.2` 系数衰减对应的速度分量。
+食物平移和旋转采用简单显式时间步积分。线性阻尼和角阻尼会逐步降低速度。食物移动后，仿真使用分离轴定理检测其与障碍物的重叠，按最小平移距离将食物推出，并使用 `0.2` 的恢复系数衰减朝向障碍物的速度分量。
 
 Once the food has moved, transporter positions are interpolated `40%` of the way toward their newly transformed slot positions. This is a visual/behavioural attachment approximation rather than a constraint-based rigid-body solver.
 
@@ -307,7 +336,9 @@ This ordering means pheromone deposition occurs before transporter force sensing
 
 ## 9. Visualization and execution / 可视化与运行
 
-When executed directly, `transport.py` creates a Matplotlib animation with:
+When executed directly, `run_animation.py` constructs the simulation and `TransportRenderer`, then creates a Matplotlib animation with:
+
+直接运行 `run_animation.py` 时，脚本会创建仿真实例和 `TransportRenderer`，并启动 Matplotlib 动画，画面包括：
 
 - grey rectangles for obstacles;
 - 灰色矩形表示障碍物；
@@ -326,17 +357,41 @@ The animation is configured for 600 frames with a nominal 50 ms interval. `sim.u
 
 动画默认配置为 600 帧，名义帧间隔为 50 毫秒。`sim.update()` 使用 `dt = 0.05`，因此设计上的仿真时间步与动画帧间隔大致对应；实际墙钟时间仍取决于绘图性能和计算机速度。
 
-The project imports NumPy and Matplotlib in its executable scripts.
+The animation renderer and standalone visualization scripts import NumPy and Matplotlib. The simulation core and batch runner do not import either plotting library.
 
-项目的可执行脚本依赖 NumPy 和 Matplotlib。
+动画绘图器和独立可视化脚本依赖 NumPy 与 Matplotlib；仿真核心和批量运行器不导入这两个绘图库。
 
-A typical invocation from the project directory is:
+Run the animation from the project directory with:
 
-从项目目录运行主仿真的典型命令如下：
+从项目目录运行动画的命令如下：
 
 ```powershell
-python transport.py
+python run_animation.py
 ```
+
+For windowless batch experiments, use `run_experiments.py`. For example, run three independent 600-step simulations and write their summary rows to a CSV file:
+
+```powershell
+python run_experiments.py --runs 3 --steps 600 --seed 10 --output results.csv
+```
+
+Each run uses a reproducible seed derived from the base seed. The CSV records the final food position and angle, displacement from its initial position, number of active transporters and returning navigators, and remaining pheromone-particle count. The default output path is `experiment_results.csv`; the runner does not render animation frames.
+
+无窗口批量实验可使用 `run_experiments.py`。例如，运行三组各 600 步的独立仿真，并将摘要结果写入 CSV：
+
+```powershell
+python run_experiments.py --runs 3 --steps 600 --seed 10 --output results.csv
+```
+
+每次运行使用由基础随机种子推导出的可复现种子。CSV 记录食物最终位置和角度、相对初始位置的位移、活跃搬运工数量、返巢导航蚂蚁数量以及剩余信息素粒子数。默认输出路径为 `experiment_results.csv`；批量运行器不会绘制动画帧。
+
+`run_experiments.py` defaults to one run, 600 steps, base seed `0`, and output file `experiment_results.csv`. The example above overrides these values. A run count or step count below one is rejected.
+
+`run_experiments.py` 默认执行 1 组仿真、每组 600 步、基础随机种子为 `0`，输出文件为 `experiment_results.csv`。上面的命令覆盖了这些默认值。运行组数或步数小于 1 时，程序会拒绝运行。
+
+An optional `--diagnostics-output` path enables a separate, streamed CSV with one row per active transporter per step. Rows contain the current pheromone attraction vector and its directional confidence (vector magnitude divided by total signal weight), local PCA trail tangent and confidence, the selected direction source, individual heading and requested force, obstacle-following state, obstacle-contact count, requested/projected group force and torque, and per-step food displacement, speed, and angular velocity. Angle fields are in radians; individual force is the requested force before obstacle projection, while the projected resultant is reported separately. Direction source `tangent` means a reliable local PCA axis oriented by that ant's own remembered heading; `pheromone_resultant` is the legacy weighted-particle direction; `memory` is retained when the tangent is ambiguous and resultant confidence is below `0.15`. Steps with no active transporters still receive a summary row. The diagnostic file is not created unless requested and must be different from the summary output path.
+
+可通过可选参数 `--diagnostics-output` 启用独立的流式诊断 CSV：每个仿真步中每只活跃搬运蚁各占一行。记录字段包括信息素合成向量及方向可信度（向量长度除以信号权重总和）、局部 PCA 路径切线及置信度、方向选择来源、个体朝向和期望拉力、避障状态、障碍接触数、投影前后的群体合力与转矩，以及食物逐步位移、速度和角速度。角度字段单位为弧度；个体拉力表示障碍投影前的期望拉力，投影后的群体合力单独记录。方向来源 `tangent` 表示按该蚂蚁自身记忆定向的可信 PCA 主轴，`pheromone_resultant` 表示原有加权粒子方向；当局部切线含糊且合向量置信度低于 `0.15` 时，来源为 `memory`，沿用该蚂蚁自己的上次路线方向。没有活跃搬运蚁的时间步也会写入一条汇总行。只有显式指定路径时才创建诊断文件，且该路径必须与摘要文件不同。
 
 No dependency manifest is present in the project directory, so the required package versions are not pinned.
 
@@ -353,9 +408,9 @@ The repository contains two earlier examples:
 - `swarm.py` uses `ant.py` to animate a group and calculate pairwise Euclidean-neighbour lists.
 - `swarm.py` 使用 `ant.py` 对一群蚂蚁进行动画演示，并计算两两之间基于欧氏距离的邻居列表。
 
-These are separate from the cooperative-transport entry point. In the current source, `swarm.py` calls `ant.move()`, but the imported `Ant` in `ant.py` defines `move_random()` and `move_with_pheromone()` instead of `move()`. Consequently, that standalone example appears to have an API mismatch and may raise `AttributeError` when run. The main `transport.py` path imports `Ant` from `ant_crw.py` and is not affected by this particular mismatch.
+These are separate from the cooperative-transport entry points. In the current source, `swarm.py` calls `ant.move()`, but the imported `Ant` in `ant.py` defines `move_random()` and `move_with_pheromone()` instead of `move()`. Consequently, that standalone example appears to have an API mismatch and may raise `AttributeError` when run. The cooperative-transport model imports `Ant` from `ant_crw.py` and is not affected by this particular mismatch.
 
-这些示例与协同搬运主入口彼此独立。当前 `swarm.py` 调用了 `ant.move()`，但它从 `ant.py` 导入的 `Ant` 类只定义了 `move_random()` 和 `move_with_pheromone()`，没有 `move()`。因此，该独立示例可能存在 API 不匹配，运行时会触发 `AttributeError`。主程序 `transport.py` 使用的是 `ant_crw.py` 中的 `Ant`，不受这一特定问题影响。
+这些示例与协同搬运的动画/实验入口彼此独立。当前 `swarm.py` 调用了 `ant.move()`，但它从 `ant.py` 导入的 `Ant` 类只定义了 `move_random()` 和 `move_with_pheromone()`，没有 `move()`。因此，该独立示例可能存在 API 不匹配，运行时会触发 `AttributeError`。协同搬运仿真模型使用的是 `ant_crw.py` 中的 `Ant`，不受这一特定问题影响。
 
 ## 11. Current capabilities and limitations / 当前功能与限制
 
@@ -392,14 +447,14 @@ These are separate from the cooperative-transport entry point. In the current so
 - **信息素方向存在歧义：**指向附近信息素粒子的向量不一定是沿路径前进的方向；路径交叉或重叠可能产生误导性的合成向量。
 - **Hard signal threshold:** The transporter controller switches between pheromone-following and social-heading modes at a fixed threshold; it does not smoothly blend the two modes or explicitly model controller damping.
 - **信号阈值硬切换：**搬运工控制器在固定阈值处切换信息素跟随和社会方向模式，没有平滑混合两种模式，也没有显式建模控制器阻尼。
-- **Simplified rigid-body physics:** The food uses basic explicit integration and approximate collision correction. The obstacle-food overlap calculation treats the food as axis-aligned even when `theta` is nonzero.
-- **刚体物理简化：**食物运动采用基础显式积分和近似碰撞修正。即使 `theta` 不为零，食物与障碍物的重叠计算仍将食物按轴对齐矩形处理。
-- **No obstacle-aware force projection:** Transporter force calculation does not project desired forces along obstacle tangents before applying them to the food. A group can continue pulling into an obstacle while collision correction pushes the food back.
-- **未进行障碍感知的力投影：**搬运工计算作用力时，没有先将期望力投影到障碍切线方向。群体可能持续将食物拉向障碍，而碰撞修正同时将食物推回。
+- **Simplified rigid-body physics:** The food uses basic explicit integration and a minimum-translation collision correction based on the separating axis theorem. It does not model contact points, friction, or angular impulse from obstacle impacts.
+- **刚体物理简化：**食物运动采用基础显式积分，并使用分离轴定理进行最小平移碰撞修正；尚未模拟接触点、摩擦或障碍物撞击产生的角冲量。
+- **Approximate obstacle-aware force projection:** The resultant force is projected against nearby obstacle contact normals, with a nest-directed tangent fallback and torque suppression when most of the resultant force is blocked. This is a simple food-level correction, not a full contact solver; it does not redistribute individual ant forces or model friction and angular contact impulses.
+- **近似的障碍感知力投影：**合力会依据邻近障碍物的接触法线投影；大部分合力被阻挡时，会回退到朝向巢穴的可行切线方向并抑制转矩。这只是食物层面的简化修正，并非完整接触求解器：它不会重新分配各蚂蚁的个体拉力，也不模拟摩擦和角向接触冲量。
 - **Greedy attachment allocation:** Slot selection is nearest-available and sequential, not a coordinated global assignment.
 - **贪心式附着分配：**槽位按最近空位顺序分配，而非通过全局协调完成分配。
-- **No success metric:** The animation counts active transporters and returning navigators, but the code does not record delivery completion, path efficiency, collision counts, or statistical performance across random seeds.
-- **缺少成功度量：**动画会统计活跃搬运工和返巢导航蚁，但代码不记录送达完成情况、路径效率、碰撞次数或不同随机种子下的统计表现。
+- **Incomplete evaluation metrics:** The animation and batch CSV report active transporters and returning navigators; the batch runner also records food displacement and final pose for seeded runs. The project does not detect delivery completion or record path efficiency and collision counts, nor does it aggregate statistics across runs.
+- **评估指标不完整：**动画和批量 CSV 都统计活跃搬运工及返巢导航蚁；批量运行器还记录设置随机种子后的食物位移和最终姿态。项目尚未检测送达完成状态，也未记录路径效率和碰撞次数，或汇总多次运行的统计结果。
 - **No physical robot integration:** There is no ROS interface, actuator model, communication protocol, hardware calibration, or deployment layer.
 - **未集成实体机器人：**项目没有 ROS 接口、执行器模型、通信协议、硬件标定或部署层。
 
@@ -407,22 +462,20 @@ These are separate from the cooperative-transport entry point. In the current so
 
 For a more reliable cooperative-transport study, the most useful extensions would be:
 
-1. Add fixed random seeds and a batch/headless simulation mode so parameter comparisons are reproducible.
-   添加固定随机种子和批处理/无窗口仿真模式，使参数比较具有可复现性。
-2. Log delivery time, food displacement, collision events, transporter count, and path length; evaluate multiple independent seeds.
-   记录送达时间、食物位移、碰撞事件、搬运工数量和路径长度，并使用多个独立随机种子评估。
-3. Replace pheromone-point attraction with local trail-tangent estimation and confidence-aware blending.
+1. Extend batch experiments with delivery detection, collision/path metrics, and aggregate statistics across multiple seeds.
+   扩展批量实验功能，增加送达检测、碰撞/路径指标，并汇总多个随机种子的统计结果。
+2. Replace pheromone-point attraction with local trail-tangent estimation and confidence-aware blending.
    将“吸引到信息素点”的策略替换为局部路径切线估计，并按方向置信度进行融合。
-4. Smooth transporter direction changes with an explicit angular-rate or damped controller, rather than relying only on a hard signal threshold.
+3. Smooth transporter direction changes with an explicit angular-rate or damped controller, rather than relying only on a hard signal threshold.
    使用显式角速度控制器或带阻尼控制器平滑搬运工转向，而不是只依赖硬阈值切换。
-5. Predict food-obstacle contact and project the desired food force onto a feasible obstacle tangent when blocked.
-   预测食物与障碍物的接触，并在受阻时将期望作用力投影到可行的障碍切线方向。
-6. Use rotated-rectangle collision geometry or a standard 2D physics engine for food-obstacle interactions.
-   使用旋转矩形碰撞几何，或采用标准二维物理引擎处理食物与障碍物的相互作用。
-7. Add tests for slot assignment, state transitions, obstacle edge cases, and force/torque calculations.
+4. Replace the simple food-level force projection with contact-aware force redistribution and friction/torque handling if more realistic obstacle navigation is needed.
+   如需更真实的障碍导航，可将食物层面的简化力投影升级为考虑接触的个体拉力重分配，并加入摩擦和转矩处理。
+5. Use a standard 2D physics engine if contact forces, friction, angular impact response, or more complex shapes are required.
+   如需接触力、摩擦、角向冲击响应或更复杂形状，可考虑使用标准二维物理引擎。
+6. Add tests for slot assignment, state transitions, obstacle edge cases, and force/torque calculations.
    为槽位分配、状态转换、障碍边界情况以及力/转矩计算添加测试。
-8. Document dependencies and provide a validated launch command in `README.md`.
-   在 `README.md` 中记录依赖，并提供经过验证的启动命令。
+7. Add a dependency manifest with tested version constraints for the visualization dependencies.
+   为可视化依赖添加包含已测试版本约束的依赖清单。
 
 ## 13. Conclusion / 结论
 
@@ -430,6 +483,6 @@ The project demonstrates a clear high-level cooperative strategy: navigator ants
 
 本项目展示了一种清晰的高层协作策略：导航蚁建立巢穴与食物之间的信息素路径，搬运工聚集在刚体食物周围，通过合成方向作用力移动食物。模块化结构将蚂蚁、食物力学、障碍几何、信息素生命周期和可视化分离，适合作为研究角色分工与群体搬运的原型。
 
-The main implementation gap between this prototype and a robust robot-coordination model is the coupling between navigation and rigid-body motion near obstacles. The current code senses pheromone locally but does not yet infer a stable trail direction or coordinate obstacle-tangent forces at the group/food level. Those areas, alongside reproducible metrics and more faithful collision geometry, are the natural next stages of development.
+The main implementation gap between this prototype and a robust robot-coordination model is the coupling between navigation and rigid-body motion near obstacles. The current code senses pheromone locally and projects the resultant food force at nearby obstacle contacts, but it does not yet infer a stable trail direction or redistribute forces across individual transporters using a full contact model. Those areas, alongside reproducible metrics and more faithful collision dynamics, are the natural next stages of development.
 
-该原型距离稳健的机器人协同模型，主要还差在障碍附近的导航与刚体运动耦合。目前代码能够局部感知信息素，但尚未推断稳定的路径方向，也未在群体/食物层面协调沿障碍切线的作用力。下一步可重点改进这些方面，并补充可复现实验指标和更准确的碰撞几何模型。
+该原型距离稳健的机器人协同模型，主要还差在障碍附近的导航与刚体运动耦合。目前代码能够局部感知信息素，并在食物接近障碍时投影合力，但尚未推断稳定的路径方向，也未通过完整接触模型在个体搬运蚁之间重分配拉力。下一步可继续完善这些方面，并补充可复现实验指标和更准确的碰撞动力学。
