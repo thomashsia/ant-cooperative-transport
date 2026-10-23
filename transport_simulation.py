@@ -1,27 +1,63 @@
-"""带障碍物的蚂蚁协作搬运仿真核心，不包含绘图依赖。"""
+"""带障碍物的蚂蚁协作搬运仿真核心，不包含绘图依赖。
+
+运行入口 ``run_animation.py`` 和 ``run_experiments.py`` 均创建本模块的
+``ObstacleTransportSimulation``，并通过 ``update`` 推进模型；显示由
+``transport_visualization.py`` 单独负责。
+"""
 
 import math
 import random
+from dataclasses import replace
 from ant_crw import Ant
 from food import Food
 from pheromone import PheromoneManager
 from obstacle import Obstacle
+from simulation_config import SimulationConfig
 
 class ObstacleTransportSimulation:
-    """管理蚂蚁、食物、障碍物和信息素，并逐帧推进仿真状态。"""
+    """管理蚂蚁、食物、障碍物和信息素，并逐帧推进仿真状态。
 
-    def __init__(self, num_ants=30, width=150, height=150,
-                 diagnostics_enabled=False):
+    每帧由 ``update`` 更新导航/搬运状态，合并个体牵引和转矩，积分食物运动、
+    解算障碍碰撞，最后更新诊断数据及信息素。
+    """
+
+    def __init__(self, num_ants=None, width=None, height=None,
+                 diagnostics_enabled=False, config=None):
+        """依据共享配置创建场景与对象。
+
+        由动画入口、批量实验入口和单元测试调用。未传入配置时使用默认参数；
+        显式尺寸或蚂蚁数通过 ``dataclasses.replace`` 覆盖配置而不修改原对象。
+        """
+        if config is None:
+            default_navigators = min(5, num_ants) if num_ants is not None else 5
+            base_config = SimulationConfig(num_navigators=default_navigators)
+        else:
+            base_config = config
+        overrides = {}
+        if num_ants is not None:
+            overrides['num_ants'] = num_ants
+        if width is not None:
+            overrides['width'] = width
+        if height is not None:
+            overrides['height'] = height
+        self.config = replace(base_config, **overrides) if overrides else base_config
+
         # 场地坐标范围为 [0, width] × [0, height]；巢穴和食物使用场地坐标。
-        self.width = width
-        self.height = height
-        self.nest = (70.0, 130.0)
+        self.width = self.config.width
+        self.height = self.config.height
+        self.nest = self.config.nest_position
         self.diagnostics_enabled = diagnostics_enabled
         self.last_diagnostics = []
         self.step_count = 0
 
         # 食物包含刚体运动状态，以及供搬运工蚁认领的周边槽位。
-        self.food = Food(x=60.0, y=30.0, width=6, height=6, mass=5.0)
+        self.food = Food(
+            x=self.config.food_position[0],
+            y=self.config.food_position[1],
+            width=self.config.food_width,
+            height=self.config.food_height,
+            mass=self.config.food_mass
+        )
 
         # 矩形继续使用中心和宽高定义；菱形使用按边界顺序排列的凸多边形顶点。
         self.obstacles = [
@@ -38,39 +74,100 @@ class ObstacleTransportSimulation:
         self._return_wall_directions = {}
 
         # 前五只蚂蚁担任导航蚁，其余蚂蚁担任搬运工。
-        num_navigators = 5
         self.ants = []
-        for i in range(num_ants):
-            is_nav = i < num_navigators
+        for i in range(self.config.num_ants):
+            is_nav = i < self.config.num_navigators
             self.ants.append(
                 Ant(
                     ant_id=i,
-                    x=random.uniform(width * 0.1, width * 0.9),
-                    y=random.uniform(height * 0.1, height * 0.9),
+                    x=random.uniform(self.width * 0.1, self.width * 0.9),
+                    y=random.uniform(self.height * 0.1, self.height * 0.9),
                     is_navigator=is_nav,
-                    width=width,
-                    height=height,
-                    speed=2.0
+                    width=self.width,
+                    height=self.height,
+                    speed=self.config.ant_speed
                 )
             )
 
         # 导航蚁返巢时沿途布置信息素，信息素管理器负责挥发和清理。
-        self.pheromone_manager = PheromoneManager(evaporation_rate=0.003)
+        self.pheromone_manager = PheromoneManager(
+            evaporation_rate=self.config.pheromone_evaporation_rate
+        )
 
     @staticmethod
     def _normalize_angle(angle):
-        """将弧度角归一化到 [-pi, pi]，便于选取最短转向方向。"""
+        """将弧度角归一化到 [-pi, pi]，便于选取最短转向方向。
+
+        供 ``_angle_lerp`` 调用；取模运算将任意角差折回一个完整圆周内。
+        """
         return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
     @staticmethod
     def _angle_lerp(current, target, alpha):
-        """沿最短角度差从当前朝向平滑转向目标朝向。"""
+        """沿最短角度差从当前朝向平滑转向目标朝向。
+
+        Bug2 wall 阶段调用；``alpha`` 控制本步完成的角度差比例，避免朝向突变。
+        """
         diff = ObstacleTransportSimulation._normalize_angle(target - current)
         return current + diff * alpha
 
-    @staticmethod
-    def _estimate_pheromone_tangent(ant, particles, radius=20.0):
-        """以局部加权 PCA 估计信息素轨迹切线及其方向置信度。"""
+    def _blend_ambiguous_pheromone_direction(
+        self, memory_x, memory_y, social_x, social_y,
+        signal_confidence, social_confidence
+    ):
+        """按信息素模糊度和同伴一致性，将群体方向有限融入个体记忆。
+
+        ``update`` 在搬运蚂蚁的信号方向不确定时调用。社会权重是上限、
+        信息素不确定度和群体一致性的乘积；归一化加权向量得到最终方向，
+        向量抵消时保留个体记忆方向。
+        """
+        signal_confidence = max(0.0, min(1.0, signal_confidence))
+        social_confidence = max(0.0, min(1.0, social_confidence))
+        social_weight = (
+            self.config.ambiguous_pheromone_max_social_weight
+            * (1.0 - signal_confidence)
+            * social_confidence
+        )
+
+        direction_x = (1.0 - social_weight) * memory_x + social_weight * social_x
+        direction_y = (1.0 - social_weight) * memory_y + social_weight * social_y
+        direction_length = math.hypot(direction_x, direction_y)
+        if direction_length > 1e-12:
+            direction_x /= direction_length
+            direction_y /= direction_length
+        else:
+            direction_x, direction_y = memory_x, memory_y
+        return direction_x, direction_y, social_weight
+
+    def _visible_pheromone_particles(self, ant, particles, perception_radius):
+        """仅返回感知范围内且与蚂蚁之间无遮挡的信息素粒子。
+
+        ``update`` 为搬运蚂蚁筛选信号，返巢导航逻辑也会调用；
+        超出半径或任一障碍与蚂蚁—粒子线段相交的粒子都会被排除。
+        """
+        visible_particles = []
+        for particle in particles:
+            distance = math.hypot(particle['x'] - ant.x, particle['y'] - ant.y)
+            if distance > perception_radius:
+                continue
+            if any(
+                obstacle.segment_intersects(
+                    ant.x, ant.y, particle['x'], particle['y']
+                )
+                for obstacle in self.obstacles
+            ):
+                continue
+            visible_particles.append(particle)
+        return visible_particles
+
+    def _estimate_pheromone_tangent(self, ant, particles, radius=20.0):
+        """以局部加权 PCA 估计信息素轨迹切线及其方向置信度。
+
+        由 transporter 方向决策和 navigator 返巢跟踪调用。强度/距离权重形成
+        加权质心及二维协方差；主轴给出切线，特征值差相对迹值衡量线性置信度。
+        返回切线、置信度和参与估计的粒子数；粒子不足或分布近似各向同性时返回
+        ``None`` 切线，避免从模糊点云猜测方向。
+        """
         local_particles = []
         total_weight = 0.0
         centroid_x = 0.0
@@ -89,7 +186,10 @@ class ObstacleTransportSimulation:
             centroid_x += particle['x'] * weight
             centroid_y += particle['y'] * weight
 
-        if len(local_particles) < 4 or total_weight <= 0:
+        if (
+            len(local_particles) < self.config.tangent_min_particle_count
+            or total_weight <= 0
+        ):
             return None, 0.0, len(local_particles)
 
         centroid_x /= total_weight
@@ -115,8 +215,9 @@ class ObstacleTransportSimulation:
             covariance_xx - covariance_yy,
             2.0 * covariance_xy
         )
+        # 对称 2x2 协方差矩阵的特征值差为 discriminant；除以迹值作尺度无关置信度。
         confidence = discriminant / trace
-        if confidence < 0.55:
+        if confidence < self.config.tangent_min_confidence:
             return None, confidence, len(local_particles)
 
         tangent_angle = 0.5 * math.atan2(
@@ -129,9 +230,53 @@ class ObstacleTransportSimulation:
             len(local_particles)
         )
 
+    def _navigator_return_trail_direction(self, ant, target_x, target_y):
+        """估计其他导航蚁留下、且有助于返巢的局部信息素切线。
+
+        仅由返巢阶段的 ``_bug2_step`` 调用。先排除自身粒子，再应用可见性和局部
+        PCA；切线符号按与巢穴方向点积校正，并拒绝缺乏最低返巢进展的方向。
+        """
+        particles_from_others = [
+            particle for particle in self.pheromone_manager.particles
+            if particle.get('source_ant_id') != ant.id
+        ]
+        visible_particles = self._visible_pheromone_particles(
+            ant,
+            particles_from_others,
+            self.config.navigator_return_pheromone_radius
+        )
+        tangent, confidence, _ = self._estimate_pheromone_tangent(
+            ant,
+            visible_particles,
+            radius=self.config.navigator_return_pheromone_radius
+        )
+        if tangent is None:
+            return None
+
+        goal_x = target_x - ant.x
+        goal_y = target_y - ant.y
+        goal_length = math.hypot(goal_x, goal_y)
+        if goal_length <= 1e-9:
+            return None
+        goal_x /= goal_length
+        goal_y /= goal_length
+
+        progress = tangent[0] * goal_x + tangent[1] * goal_y
+        if progress < 0:
+            tangent = (-tangent[0], -tangent[1])
+            progress = -progress
+        if progress < self.config.navigator_min_nest_progress:
+            return None
+
+        return tangent, confidence
+
     def _select_wall_direction(self, ant, target_x, obs,
                                share_return_direction=False):
-        """根据蚂蚁、目标与障碍物的相对位置，选定绕障方向并在绕行期间保持。"""
+        """根据蚂蚁、目标与障碍物相对位置选择并可共享绕障方向。
+
+        由两个 Bug2 移动器在进入 wall 状态时调用；返巢 navigator 可将首次方向
+        记录到 ``_return_wall_directions``，让同一障碍上的后续导航蚁复用该决定。
+        """
         if share_return_direction and obs in self._return_wall_directions:
             return self._return_wall_directions[obs]
 
@@ -148,20 +293,46 @@ class ObstacleTransportSimulation:
             self._return_wall_directions[obs] = direction
         return direction
 
-    def _bug2_step(self, ant, target_x, target_y, allow_wobble=False):
+    def _bug2_step(self, ant, target_x, target_y, allow_wobble=False,
+                   follow_return_pheromone=False):
         """
         推进一只蚂蚁的 Bug2 风格避障状态机一步。
 
         go 阶段朝目标移动，预测下一位置碰到障碍时切换到 wall；
         wall 阶段沿障碍切线绕行，连续两步视线畅通后再恢复 go。
         allow_wobble 仅允许在 go 阶段加入微弱航向变化，wall 阶段始终确定性移动。
+        由 ``update`` 驱动返巢 navigator；其 wall 子状态也由自由搜索移动器委托。
         """
         if ant.bug_phase == 'go':
             # 计算当前蚂蚁指向目标的期望朝向。
             dx = target_x - ant.x
             dy = target_y - ant.y
             if math.hypot(dx, dy) > 1e-6:
-                target_heading = math.atan2(dy, dx)
+                target_x_direction = dx / math.hypot(dx, dy)
+                target_y_direction = dy / math.hypot(dx, dy)
+                if follow_return_pheromone:
+                    trail = self._navigator_return_trail_direction(
+                        ant, target_x, target_y
+                    )
+                    if trail is not None:
+                        tangent, confidence = trail
+                        blend = self.config.navigator_trail_blend * confidence
+                        target_x_direction = (
+                            (1.0 - blend) * target_x_direction
+                            + blend * tangent[0]
+                        )
+                        target_y_direction = (
+                            (1.0 - blend) * target_y_direction
+                            + blend * tangent[1]
+                        )
+                        direction_length = math.hypot(
+                            target_x_direction, target_y_direction
+                        )
+                        target_x_direction /= direction_length
+                        target_y_direction /= direction_length
+                target_heading = math.atan2(
+                    target_y_direction, target_x_direction
+                )
                 if allow_wobble:
                     # 用障碍物包围盒估算最近距离；对凸多边形这是偏保守的距离。
                     nearest_obstacle_distance = min(
@@ -171,6 +342,19 @@ class ObstacleTransportSimulation:
                         )
                         for obs in self.obstacles
                     ) if self.obstacles else float('inf')
+                    # 返巢也带部分 CRW：把"上一步朝向 + 高斯转角"按权重混入目标方向；
+                    # 靠近障碍时关闭，避免随机转向干扰绕障。
+                    crw_weight = self.config.navigator_return_crw_weight
+                    if (crw_weight > 0
+                            and nearest_obstacle_distance > max(4.0, ant.speed * 3.0)):
+                        crw_heading = ant.heading + random.gauss(
+                            0.0, self.config.navigator_return_turn_sigma
+                        )
+                        mixed_x = ((1.0 - crw_weight) * math.cos(target_heading)
+                                   + crw_weight * math.cos(crw_heading))
+                        mixed_y = ((1.0 - crw_weight) * math.sin(target_heading)
+                                   + crw_weight * math.sin(crw_heading))
+                        target_heading = math.atan2(mixed_y, mixed_x)
                     # 将小偏角保存在蚂蚁身上，使相邻帧的扰动平滑连续而非逐帧跳变。
                     wobble = getattr(ant, 'return_heading_wobble', 0.0)
                     if nearest_obstacle_distance > max(4.0, ant.speed * 3.0):
@@ -248,12 +432,26 @@ class ObstacleTransportSimulation:
             if not obs.check_collision_point(nx, ny):
                 ant.x, ant.y = nx, ny
             else:
-                # 若切线方向仍会进入障碍，则改用由障碍中心确定的备用方向，不注入随机角度。
-                obstacle_angle = math.atan2(ant.y - obs.y, ant.x - obs.x)
-                fallback_angle = obstacle_angle + ant.bug_direction * 0.75
-                ant.heading = self._angle_lerp(ant.heading, fallback_angle, 0.65)
-                ant.x = max(0, min(self.width, ant.x + ant.speed * math.cos(ant.heading)))
-                ant.y = max(0, min(self.height, ant.y + ant.speed * math.sin(ant.heading)))
+                # 平滑航向可能切入凸障碍；改沿选定边界切线移动，避免径向回退造成掉头。
+                ant.heading = target_angle
+                for step_fraction in (1.0, 0.5, 0.25, 0.125, 0.0625):
+                    tangent_x = max(
+                        0,
+                        min(
+                            self.width,
+                            ant.x + ant.speed * step_fraction * math.cos(target_angle)
+                        )
+                    )
+                    tangent_y = max(
+                        0,
+                        min(
+                            self.height,
+                            ant.y + ant.speed * step_fraction * math.sin(target_angle)
+                        )
+                    )
+                    if not obs.check_collision_point(tangent_x, tangent_y):
+                        ant.x, ant.y = tangent_x, tangent_y
+                        break
 
             # 作为最后一道保护，将可能进入矩形内部的位置投影回障碍外缘。
             ant.x, ant.y = obs.clamp_position(ant.x, ant.y)
@@ -265,6 +463,7 @@ class ObstacleTransportSimulation:
 
         期望朝向由食物气味和相关随机游走（CRW）决定；
         前进遇到障碍时进入 wall 状态，后续交给 Bug2 风格的绕障逻辑。
+        由 ``update`` 驱动自由搜索中的 navigator 和未加入搬运队伍的 transporter。
         """
         if ant.bug_phase == 'go':
             # 传入空信息素列表，确保自由搜索阶段只响应食物气味或 CRW。
@@ -302,10 +501,14 @@ class ObstacleTransportSimulation:
         elif ant.bug_phase == 'wall':
             self._bug2_step(ant, target_x, target_y)
 
-    def _can_navigator_detect_food(self, ant, detection_radius=15.0):
-        """仅当导航蚁足够接近且与食物中心之间无遮挡时，才确认发现食物。"""
+    def _can_navigator_detect_food(self, ant):
+        """仅当导航蚁足够接近且与食物中心之间无遮挡时，才确认发现食物。
+
+        由 ``update`` 在自由搜索移动后调用；距离阈值读取配置，障碍线段相交表示
+        视线被挡，蚂蚁不会因此进入返巢状态。
+        """
         distance = math.hypot(self.food.x - ant.x, self.food.y - ant.y)
-        if distance > detection_radius:
+        if distance > self.config.navigator_food_detection_radius:
             return False
 
         return not any(
@@ -314,7 +517,12 @@ class ObstacleTransportSimulation:
         )
 
     def update(self):
-        """推进一帧仿真：更新蚂蚁状态、计算搬运作用力，再更新食物和信息素。"""
+        """推进一帧仿真并刷新状态、诊断结果。
+
+        动画回调、实验循环及回归测试调用本方法。执行顺序是导航蚁状态、搬运蚁
+        状态/槽位、信息素和同伴方向合成、合力/转矩及障碍约束、食物积分与碰撞、
+        诊断记录、蚂蚁位置约束、信息素挥发；顺序决定同一帧内的状态更新时间点。
+        """
         dt = 0.05
 
         # 1. 更新导航蚁：搜索食物、携带信息素返回巢穴。
@@ -337,15 +545,21 @@ class ObstacleTransportSimulation:
                         ant.bug_direction = 1
 
                 elif ant.state == 'returning':
-                    # 返巢时允许远离障碍处出现轻微航向变化；沿途留下信息素轨迹。
+                    # 返巢时轻度跟随其他导航蚁的路线提示，并沿途留下信息素。
                     self._bug2_step(
-                        ant, self.nest[0], self.nest[1], allow_wobble=True
+                        ant,
+                        self.nest[0],
+                        self.nest[1],
+                        allow_wobble=True,
+                        follow_return_pheromone=True
                     )
-                    self.pheromone_manager.add_pheromone(ant.x, ant.y, intensity=1.0)
+                    self.pheromone_manager.add_pheromone(
+                        ant.x, ant.y, intensity=1.0, source_ant_id=ant.id
+                    )
 
                     # 回到巢穴附近后重新开始搜索，以完成下一轮导航循环。
                     dist_to_nest = math.hypot(self.nest[0] - ant.x, self.nest[1] - ant.y)
-                    if dist_to_nest <= 15.0:
+                    if dist_to_nest <= self.config.navigator_nest_arrival_radius:
                         ant.state = 'free'
                         ant.bug_phase = 'go'
                         ant.bug_obstacle = None
@@ -407,6 +621,7 @@ class ObstacleTransportSimulation:
                     ant.transport_time = 0.0
                     ant.max_transport_time = random.uniform(6.0, 12.0)
                     ant.pheromone_heading = ant.heading
+                    ant.signal_lost_time = 0.0
                     ant.bug_phase = 'go'
                     ant.bug_obstacle = None
                     ant.bug_direction = 1
@@ -428,23 +643,33 @@ class ObstacleTransportSimulation:
             # 单只蚂蚁施力大小；更长的持续搬运时间会提高其群体方向权重。
             ant_intentions = []
 
-            perception_radius = 60.0
-            signal_threshold = 0.02
+            perception_radius = self.config.transporter_pheromone_radius
+            signal_threshold = self.config.pheromone_signal_threshold
 
             for ant in transporters:
                 # 记录每只蚂蚁的当前前进方向和随搬运时间增长的权重。
                 weight = 1.0 + 0.3 * ant.transport_time
 
-                vx = math.cos(ant.heading)
-                vy = math.sin(ant.heading)
+                # 个体与群体共识都使用方向记忆：搬运期间 heading 不更新，信号消失后
+                # 记忆仍保留最后一次可信的跟随方向，避免方向突然跳回附着前的朝向。
+                held_heading = getattr(ant, 'pheromone_heading', ant.heading)
+                vx = math.cos(held_heading)
+                vy = math.sin(held_heading)
+
+                visible_particles = self._visible_pheromone_particles(
+                    ant,
+                    self.pheromone_manager.particles,
+                    perception_radius
+                )
 
                 # 汇总感知范围内的信息素方向，距离越近、强度越高的粒子贡献越大。
                 p_attract_x, p_attract_y = 0.0, 0.0
                 p_weight_sum = 0.0
 
-                for p in self.pheromone_manager.particles:
+                for p in visible_particles:
                     dist = math.hypot(p['x'] - ant.x, p['y'] - ant.y)
                     if 0 < dist <= perception_radius:
+                        # 信息素贡献 = 指向粒子的单位向量 × 强度/距离衰减权重。
                         w = p['intensity'] / (dist ** 1.2 + 0.1)
                         p_attract_x += (p['x'] - ant.x) / dist * w
                         p_attract_y += (p['y'] - ant.y) / dist * w
@@ -452,13 +677,23 @@ class ObstacleTransportSimulation:
 
                 # 有有效信息素时按信息素方向行动；否则保留自身方向供后续社会混合使用。
                 has_pheromone_signal = p_weight_sum > signal_threshold
+                # 记录连续无信号的时长，供无信号分支逐步提高社会权重。
+                if has_pheromone_signal:
+                    ant.signal_lost_time = 0.0
+                else:
+                    ant.signal_lost_time = getattr(ant, 'signal_lost_time', 0.0) + dt
                 p_norm = math.hypot(p_attract_x, p_attract_y)
+                # 合向量长度/总权重衡量方向一致性；相反轨迹互相抵消时该值会变小。
                 pheromone_direction_confidence = (
                     p_norm / p_weight_sum if p_weight_sum > 0 else 0.0
                 )
                 direction_source = 'social'
                 if has_pheromone_signal:
-                    if p_norm > 1e-12 and pheromone_direction_confidence >= 0.15:
+                    if (
+                        p_norm > 1e-12
+                        and pheromone_direction_confidence
+                        >= self.config.resultant_min_confidence
+                    ):
                         chem_x = p_attract_x / p_norm
                         chem_y = p_attract_y / p_norm
                         ant.pheromone_heading = math.atan2(chem_y, chem_x)
@@ -475,7 +710,9 @@ class ObstacleTransportSimulation:
 
                 tangent, tangent_confidence, tangent_particle_count = (
                     self._estimate_pheromone_tangent(
-                        ant, self.pheromone_manager.particles
+                        ant,
+                        visible_particles,
+                        radius=self.config.transporter_pheromone_radius
                     )
                 )
                 if has_pheromone_signal:
@@ -516,6 +753,8 @@ class ObstacleTransportSimulation:
                         'pheromone_tangent_confidence': tangent_confidence,
                         'pheromone_tangent_particle_count': tangent_particle_count,
                         'direction_source': direction_source,
+                        'group_direction_confidence': None,
+                        'fallback_social_weight': 0.0,
                         'has_pheromone_signal': has_pheromone_signal,
                         'individual_force_x': None,
                         'individual_force_y': None,
@@ -529,6 +768,11 @@ class ObstacleTransportSimulation:
                     'chem_x': chem_x,
                     'chem_y': chem_y,
                     'has_signal': has_pheromone_signal,
+                    'direction_source': direction_source,
+                    'signal_confidence': max(
+                        pheromone_direction_confidence,
+                        tangent_confidence
+                    ),
                     'weight': weight,
                     'diagnostic_row': diagnostic_row,
                 })
@@ -551,9 +795,60 @@ class ObstacleTransportSimulation:
                 if item['has_signal']:
                     blended_x = item['chem_x']
                     blended_y = item['chem_y']
+                    if item['direction_source'] == 'memory':
+                        peer_wx = sum(
+                            peer['vx'] * peer['weight']
+                            for peer in ant_intentions if peer is not item
+                        )
+                        peer_wy = sum(
+                            peer['vy'] * peer['weight']
+                            for peer in ant_intentions if peer is not item
+                        )
+                        peer_weight_sum = sum(
+                            peer['weight']
+                            for peer in ant_intentions if peer is not item
+                        )
+                        peer_norm = math.hypot(peer_wx, peer_wy)
+                        group_direction_confidence = (
+                            peer_norm / peer_weight_sum
+                            if peer_weight_sum > 0 else 0.0
+                        )
+                        if peer_norm > 1e-12:
+                            peer_wx /= peer_norm
+                            peer_wy /= peer_norm
+                        else:
+                            peer_wx, peer_wy = item['chem_x'], item['chem_y']
+
+                        (
+                            blended_x,
+                            blended_y,
+                            fallback_social_weight
+                        ) = self._blend_ambiguous_pheromone_direction(
+                            item['chem_x'],
+                            item['chem_y'],
+                            peer_wx,
+                            peer_wy,
+                            item['signal_confidence'],
+                            group_direction_confidence
+                        )
+                        if fallback_social_weight > 0:
+                            item['direction_source'] = 'memory_social'
+                        if self.diagnostics_enabled:
+                            item['diagnostic_row'][
+                                'group_direction_confidence'
+                            ] = group_direction_confidence
+                            item['diagnostic_row'][
+                                'fallback_social_weight'
+                            ] = fallback_social_weight
                 else:
-                    crw_weight = 0.4
-                    social_weight = 0.6
+                    # 信号刚消失时保持记忆方向；随丢失时间增长，社会权重由 0 升到 0.6。
+                    fade = min(
+                        1.0,
+                        getattr(ant, 'signal_lost_time', 0.0)
+                        / self.config.signal_loss_fade_time
+                    )
+                    social_weight = 0.6 * fade
+                    crw_weight = 1.0 - social_weight
                     blended_x = crw_weight * item['vx'] + social_weight * avg_social_x
                     blended_y = crw_weight * item['vy'] + social_weight * avg_social_y
 
@@ -565,7 +860,13 @@ class ObstacleTransportSimulation:
                     fx, fy = force_magnitude, 0.0
 
                 forces.append((fx, fy))
+                # 保存障碍投影前的个体拉力，供可视化显示每只搬运蚁的追踪方向。
+                ant.individual_force = (fx, fy)
+                ant.force_direction_source = item['direction_source']
                 if self.diagnostics_enabled:
+                    item['diagnostic_row']['direction_source'] = (
+                        item['direction_source']
+                    )
                     item['diagnostic_row']['individual_force_x'] = fx
                     item['diagnostic_row']['individual_force_y'] = fy
 
@@ -596,6 +897,7 @@ class ObstacleTransportSimulation:
                 continue
 
             contact_normals.append(contact_normal)
+            # 点积是合力在接触法线上的分量；负值表示力指向障碍内部，故投影掉。
             normal_force = total_fx * contact_normal[0] + total_fy * contact_normal[1]
             if normal_force < 0:
                 total_fx -= normal_force * contact_normal[0]

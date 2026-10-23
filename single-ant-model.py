@@ -8,10 +8,13 @@ import matplotlib.animation as animation
 
 
 class Ant:
-    """在矩形场地内进行随机方向移动的单只蚂蚁。"""
+    """在矩形场地内随机移动的独立示例蚂蚁。
+
+    仅由本文件的动画入口创建；与协同搬运主仿真的 ``ant_crw.Ant`` 无关。
+    """
 
     def __init__(self, x, y, width=100, height=100):
-        """初始化蚂蚁的位置、场地范围和固定移动步长。"""
+        """初始化位置、场地范围和固定步长；由本文件演示入口调用。"""
         self.x = x
         self.y = y
         self.width = width
@@ -19,7 +22,10 @@ class Ant:
         self.speed = 2.0  # 移动步长
 
     def move(self):
-        """随机选取一个方向移动一步，并将位置限制在场地边界内。"""
+        """随机选取方向移动一步，并将坐标裁剪到场地边界。
+
+        由动画 ``update`` 回调调用；均匀采样角度后将步长分解为 x/y 位移。
+        """
         # 随机生成一个方向角 (0 到 2π)
         angle = random.uniform(0, 2 * math.pi)
         

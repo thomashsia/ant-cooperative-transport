@@ -10,10 +10,14 @@ from ant import Ant
 
 
 class AntSwarmSimulation:
-    """初始化一群蚂蚁，并计算每只蚂蚁感知范围内的邻居。"""
+    """初始化一群蚂蚁，并计算每只蚂蚁感知范围内的邻居。
+
+    这是早期的独立局部感知演示，不参与协同搬运主仿真；脚本入口的动画回调调用
+    ``update`` 获取邻居编号，再将目标蚂蚁及其邻居着色显示。
+    """
 
     def __init__(self, num_ants=20, width=100, height=100, perception_radius=20.0):
-        """设置场地和感知半径，并在场地中部随机布置蚂蚁。"""
+        """设置场地和感知半径，并在场地中部随机布置蚂蚁；由本文件演示入口调用。"""
         self.width = width
         self.height = height
         self.perception_radius = perception_radius
@@ -32,10 +36,14 @@ class AntSwarmSimulation:
         ]
 
     def update(self):
-        """推进所有蚂蚁一步，并返回各蚂蚁当前可感知的邻居编号。"""
+        """推进所有蚂蚁一步，并返回各蚂蚁可感知的邻居编号。
+
+        仅供本文件的 ``update_frame`` 演示回调使用。邻居判断为两两欧氏距离不大于
+        ``perception_radius``；该简单演示不考虑障碍遮挡或信息素。
+        """
         # 先更新位置，再依据更新后的坐标计算邻居关系。
         for ant in self.ants:
-            ant.move()
+            ant.move_random()
 
         # 逐对计算欧氏距离；距离不超过感知半径的蚂蚁互为邻居。
         perceptions = {}
@@ -70,12 +78,15 @@ if __name__ == "__main__":
     scatter = ax.scatter([], [], s=60, edgecolors='gray', linewidths=0.5)
     
     def init():
-        """清空散点数据，供动画初始化时调用。"""
+        """清空散点数据；由 ``FuncAnimation`` 的初始化回调调用。"""
         scatter.set_offsets(np.empty((0, 2)))
         return scatter,
 
     def update_frame(frame):
-        """动画回调：推进仿真，并根据目标蚂蚁邻居关系更新散点颜色。"""
+        """动画帧回调：更新邻居关系、坐标和颜色。
+
+        由 ``FuncAnimation`` 调用；目标蚂蚁为红色、邻居为金色、其余蚂蚁为黑色。
+        """
         perceptions = sim.update()
         
         # 汇总所有蚂蚁当前位置并更新散点坐标。

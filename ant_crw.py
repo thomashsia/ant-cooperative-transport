@@ -1,14 +1,26 @@
-"""用于协作搬运仿真的蚂蚁模型，包含 CRW、信息素感知和 Bug2 状态数据。"""
+"""主协同搬运仿真使用的蚂蚁模型。
+
+本模块由 :mod:`transport_simulation` 导入；自由搜索、逃离和导航移动由仿真
+状态机调用。它与独立示例使用的 :mod:`ant` 是两套不同的蚂蚁实现。
+"""
 
 import math
 import random
 
 
 class Ant:
-    """保存蚂蚁角色、行为状态、运动状态和避障状态。"""
+    """保存蚂蚁角色、行为状态、运动状态和避障状态。
+
+    由 ``ObstacleTransportSimulation.__init__`` 创建。移动方法可由仿真状态机
+    调用，也可供其他模型复用；搬运状态的施力方向由仿真核心另行计算。
+    """
 
     def __init__(self, ant_id, x, y, is_navigator=False, width=100, height=100, speed=2.0):
-        """创建导航蚁或搬运工蚁，并初始化其状态机和运动参数。"""
+        """创建导航蚁或搬运工蚁，并初始化状态。
+
+        ``is_navigator`` 决定角色及状态字段；主仿真在创建种群时调用本方法。
+        ``heading`` 用弧度表示，后续位移通过 ``cos/sin(heading) * speed`` 得到。
+        """
         self.id = ant_id
         self.x = x
         self.y = y
@@ -35,14 +47,21 @@ class Ant:
         self.heading = random.uniform(0, 2 * math.pi)
 
     def constrain_position(self, obstacles):
-        """依次将蚂蚁从所有障碍物内部投影到最近的外侧边缘。"""
+        """将落入障碍物内的位置投影到障碍外。
+
+        调用方：主仿真每帧末尾调用；逐个复用 ``Obstacle.clamp_position``。
+        """
         if not obstacles:
             return
         for obs in obstacles:
             self.x, self.y = obs.clamp_position(self.x, self.y)
 
     def move_random(self, obstacles=None):
-        """执行相关随机游走（CRW）：在上一帧朝向附近随机改变方向。"""
+        """执行相关随机游走（CRW）并处理单步障碍碰撞。
+
+        主仿真在 transporter ``escaping`` 状态调用；碰撞时以反向加随机偏角
+        尝试脱离。朝向角由高斯扰动更新，坐标由极坐标位移转换为 x/y 分量。
+        """
         turn_angle = random.gauss(0.0, 0.35)
         self.heading += turn_angle
 
@@ -70,7 +89,10 @@ class Ant:
             self.y = max(0, min(self.height, self.y + self.speed * math.sin(self.heading)))
 
     def move_towards(self, target_x, target_y, obstacles=None):
-        """朝给定目标移动，并在目标方向上加入少量随机偏角。"""
+        """朝目标移动一步并加入小幅随机偏角。
+
+        这是供其他仿真复用的移动接口；当前协同搬运主流程不直接调用。
+        """
         dx = target_x - self.x
         dy = target_y - self.y
         dist = math.hypot(dx, dy)
@@ -103,12 +125,17 @@ class Ant:
 
     def compute_pheromone_heading(self, pheromone_particles, food_pos,
                                   food_odor_radius=20.0, perception_radius=60.0,
-                                  signal_threshold=0.02):
+                                  signal_threshold=0.02, obstacles=None):
         """
         只计算期望朝向，不移动，也不处理碰撞。
 
         行为按优先级互斥：先跟随有效信息素，再追踪气味范围内的食物，
         两者都不可用时则沿当前朝向执行相关随机游走。
+
+        调用方：``_free_ant_step_no_pheromone`` 用空粒子列表做搜索，
+        ``move_with_pheromone`` 可将其作为可复用的感知/决策步骤。
+        向量贡献按粒子方向单位向量乘以强度-距离权重累计；``atan2`` 将合向量
+        转为朝向。传入障碍物时，视线被实体遮挡的粒子会被排除。
         """
         # 汇总感知半径内信息素粒子的方向和距离/强度加权值。
         p_attract_x, p_attract_y = 0.0, 0.0
@@ -117,6 +144,13 @@ class Ant:
         for p in pheromone_particles:
             dist = math.hypot(p['x'] - self.x, p['y'] - self.y)
             if 0 < dist <= perception_radius:
+                if obstacles and any(
+                    obstacle.segment_intersects(
+                        self.x, self.y, p['x'], p['y']
+                    )
+                    for obstacle in obstacles
+                ):
+                    continue
                 w = p['intensity'] / (dist ** 1.5 + 0.1)
                 p_attract_x += (p['x'] - self.x) / dist * w
                 p_attract_y += (p['y'] - self.y) / dist * w
@@ -139,7 +173,11 @@ class Ant:
     def move_with_pheromone(self, pheromone_particles, food_pos, obstacles=None,
                             food_odor_radius=20.0, perception_radius=60.0,
                             ignore_signals=False):
-        """计算信息素/食物引导朝向并移动一步；可选忽略信号直接随机游走。"""
+        """按信息素/食物信号或 CRW 移动一步。
+
+        当前主仿真自由蚂蚁使用 ``_free_ant_step_no_pheromone`` 管理移动与 Bug2，
+        不调用本方法；这是包含单步碰撞回退的独立、可复用接口。
+        """
         if ignore_signals:
             self.move_random(obstacles)
             return
@@ -148,7 +186,8 @@ class Ant:
         self.heading = self.compute_pheromone_heading(
             pheromone_particles, food_pos,
             food_odor_radius=food_odor_radius,
-            perception_radius=perception_radius
+            perception_radius=perception_radius,
+            obstacles=obstacles
         )
 
         # 根据朝向计算下一位置，并防止越出场地。
